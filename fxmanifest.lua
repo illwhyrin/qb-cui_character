@@ -1,23 +1,18 @@
 fx_version 'cerulean'
-games { 'gta5' }
+game 'gta5'
 
 client_scripts {
-    '@es_extended/locale.lua',
-    'shared/config.lua',
-    'locales/en.lua',
-    --'client/blacklist.lua',
+    'config.lua',
     'client/camera.lua',
     'client/main.lua'
 }
 
 server_scripts {
-    '@mysql-async/lib/MySQL.lua',
-    'shared/config.lua',
-    --'@esx_identity/server/main.lua',
+    'config.lua',
     'server/main.lua'
 }
 
-ui_page('ui/index.html')
+ui_page 'ui/index.html'
 
 files {
     'ui/index.html',
@@ -48,16 +43,7 @@ files {
     'ui/pages/optional/makeup_facepaint.html',
 }
 
-dependencies {
-    'es_extended'
-}
-
 exports {
     'IsPlayerFullyLoaded',
     'SetOnDutyStatus'
-}
-
-provide {
-    'skinchanger',
-    'esx_skin'
 }

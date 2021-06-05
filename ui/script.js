@@ -53,7 +53,7 @@ $(document).ready(function() {
         else if (event.data.action == 'activateTab') {
             $('#tab-' + event.data.tab).addClass('active');
             $('#' + event.data.tab).show()
-            $.post('https://cui_character/setCurrentTab', JSON.stringify({
+            $.post('https://qb-cui_character/setCurrentTab', JSON.stringify({
                 tab: event.data.tab,
             }));
         }
@@ -112,10 +112,10 @@ function setView(event, view) {
     $('.cameraview').removeClass('active')
 
     if (!wasActive) {
-        $.post('https://cui_character/setCameraView', JSON.stringify({
+        $.post('https://qb-cui_character/setCameraView', JSON.stringify({
             view: view
         }));
-        $.post('https://cui_character/playSound', JSON.stringify({
+        $.post('https://qb-cui_character/playSound', JSON.stringify({
             sound: 'panelbuttonclick'
         }));
     }
@@ -155,7 +155,7 @@ $('#cameracontrol').on('mousemove', function(event) {
         lastScreenY = event.screenY;
         lastOffsetX = offsetX;
         lastOffsetY = offsetY;
-        $.post('https://cui_character/updateCameraRotation', JSON.stringify({
+        $.post('https://qb-cui_character/updateCameraRotation', JSON.stringify({
             x: offsetX,
             y: offsetY,
         }));
@@ -164,7 +164,7 @@ $('#cameracontrol').on('mousemove', function(event) {
 
 $('#cameracontrol').on('wheel', function(event) {
     let zoom = event.originalEvent.deltaY / 2000;
-    $.post('https://cui_character/updateCameraZoom', JSON.stringify({
+    $.post('https://qb-cui_character/updateCameraZoom', JSON.stringify({
         zoom: zoom,
     }));
 });
@@ -526,7 +526,7 @@ function closeWindow(save) {
         return;
     }
 
-    $.post('https://cui_character/close', JSON.stringify({
+    $.post('https://qb-cui_character/close', JSON.stringify({
         save: save
     }));
 }
@@ -539,10 +539,10 @@ function openTab(evt, tab) {
     $('#' + tab).show();
 
     if (!wasActive) {
-        $.post('https://cui_character/playSound', JSON.stringify({
+        $.post('https://qb-cui_character/playSound', JSON.stringify({
             sound:'tabchange'
         }));
-        $.post('https://cui_character/setCurrentTab', JSON.stringify({
+        $.post('https://qb-cui_character/setCurrentTab', JSON.stringify({
             tab: tab,
         }));
     }
@@ -552,7 +552,7 @@ function openTab(evt, tab) {
 
 $('.panelbottom button').on('click', function(evt) {
     evt.preventDefault();
-    $.post('https://cui_character/playSound', JSON.stringify({sound:'panelbuttonclick'}));
+    $.post('https://qb-cui_character/playSound', JSON.stringify({sound:'panelbuttonclick'}));
 });
 
 $('#main .menuclose').on('click', function(evt) {
@@ -590,7 +590,7 @@ $('.popup #yes').on('click', function(evt) {
 
 /*  option/value ui controls   */
 $(document).on('click', '.controls button', function(evt) {
-    $.post('https://cui_character/playSound', JSON.stringify({
+    $.post('https://qb-cui_character/playSound', JSON.stringify({
         sound: 'optionchange'
     }));
 });
@@ -644,20 +644,20 @@ $(document).on('click', '.slider .controls button', function(evt) {
 
 /*  option/value change effects     */
 function updateGender(value) {
-    $.post('https://cui_character/updateGender', JSON.stringify({
+    $.post('https://qb-cui_character/updateGender', JSON.stringify({
         value: value,
     }));
 }
 
 function updateHeadBlend(key, value) {
-    $.post('https://cui_character/updateHeadBlend', JSON.stringify({
+    $.post('https://qb-cui_character/updateHeadBlend', JSON.stringify({
         key: key,
         value: value,
     }));
 }
 
 function updateFaceFeature(key, value, index) {
-    $.post('https://cui_character/updateFaceFeature', JSON.stringify({
+    $.post('https://qb-cui_character/updateFaceFeature', JSON.stringify({
         key: key,
         value: value,
         index: index,
@@ -665,13 +665,13 @@ function updateFaceFeature(key, value, index) {
 }
 
 function updateEyeColor(value) {
-    $.post('https://cui_character/updateEyeColor', JSON.stringify({
+    $.post('https://qb-cui_character/updateEyeColor', JSON.stringify({
         value: value,
     }));
 }
 
 function updateHairColor(key, value, highlight) {
-    $.post('https://cui_character/updateHairColor', JSON.stringify({
+    $.post('https://qb-cui_character/updateHairColor', JSON.stringify({
         key: key,
         value: value,
         highlight: highlight,
@@ -679,7 +679,7 @@ function updateHairColor(key, value, highlight) {
 }
 
 function updateHeadOverlay(key, keyPaired, value, index, isOpacity) {
-    $.post('https://cui_character/updateHeadOverlay', JSON.stringify({
+    $.post('https://qb-cui_character/updateHeadOverlay', JSON.stringify({
         key: key,
         keyPaired: keyPaired, // NOTE: opacity for type and type for opacity
         value: value,
@@ -689,7 +689,7 @@ function updateHeadOverlay(key, keyPaired, value, index, isOpacity) {
 }
 
 function updateHeadOverlayExtra(key, keyPaired, value, index, keyExtra, valueExtra, indexExtra, isOpacity) {
-    $.post('https://cui_character/updateHeadOverlayExtra', JSON.stringify({
+    $.post('https://qb-cui_character/updateHeadOverlayExtra', JSON.stringify({
         key: key,
         keyPaired: keyPaired,
         value: value,
@@ -702,7 +702,7 @@ function updateHeadOverlayExtra(key, keyPaired, value, index, keyExtra, valueExt
 }
 
 function updateOverlayColor(key, value, index, colortype) {
-    $.post('https://cui_character/updateOverlayColor', JSON.stringify({
+    $.post('https://qb-cui_character/updateOverlayColor', JSON.stringify({
         key: key,
         value: value,
         index: index,
@@ -711,7 +711,7 @@ function updateOverlayColor(key, value, index, colortype) {
 }
 
 function updateComponent(drawable, dvalue, texture, tvalue, index) {
-    $.post('https://cui_character/updateComponent', JSON.stringify({
+    $.post('https://qb-cui_character/updateComponent', JSON.stringify({
         drawable: drawable,
         dvalue: dvalue,
         texture: texture,
@@ -723,7 +723,7 @@ function updateComponent(drawable, dvalue, texture, tvalue, index) {
 // NOTE: This one calls different function than the above,
 //       as it needs to check for 'forced components' (torso parts etc.)
 function updateApparelComponent(drwkey, drwval, texkey, texval, cmpid) {
-    $.post('https://cui_character/updateApparelComponent', JSON.stringify({
+    $.post('https://qb-cui_character/updateApparelComponent', JSON.stringify({
         drwkey: drwkey,
         drwval: drwval,
         texkey: texkey,
@@ -733,7 +733,7 @@ function updateApparelComponent(drwkey, drwval, texkey, texval, cmpid) {
 }
 
 function updateApparelProp(drwkey, drwval, texkey, texval, propid) {
-    $.post('https://cui_character/updateApparelProp', JSON.stringify({
+    $.post('https://qb-cui_character/updateApparelProp', JSON.stringify({
         drwkey: drwkey,
         drwval: drwval,
         texkey: texkey,
@@ -770,7 +770,7 @@ $(document).on('click', 'input:radio[name=sex]', function(evt) {
         openPopup(popupData, function(target) {
             target.prop('checked', true);
             updateGender(target.val());
-            $.post('https://cui_character/playSound', JSON.stringify({
+            $.post('https://qb-cui_character/playSound', JSON.stringify({
                 sound:'optionchange'
             }));
         }, $(this));
@@ -783,7 +783,7 @@ $(document).on('click', '.palette input:radio + label', function(evt) {
     if (radio.is(':not(:checked)')) {
         radio.prop('checked', true);
         radio.trigger('change');
-        $.post('https://cui_character/playSound', JSON.stringify({
+        $.post('https://qb-cui_character/playSound', JSON.stringify({
             sound:'optionchange'
         }));
     }
@@ -921,7 +921,7 @@ $(document).on('change', 'select.facepaintoverlay', function(evt) {
     }
 
     if (prevtype != type) {
-        $.post('https://cui_character/syncFacepaintOpacity', JSON.stringify({
+        $.post('https://qb-cui_character/syncFacepaintOpacity', JSON.stringify({
             prevtype: prevtype,
             currenttype: type,
         }));
@@ -929,7 +929,7 @@ $(document).on('change', 'select.facepaintoverlay', function(evt) {
         let colorable = (prevtype == 'makeup');
         let group = $(this).parents().eq(2);
         setupFacepaintColors(group, colorable, true);
-        $.post('https://cui_character/clearMakeup', JSON.stringify({
+        $.post('https://qb-cui_character/clearMakeup', JSON.stringify({
             clearopacity: false,
             clearblusher: true,
         }));
@@ -954,13 +954,13 @@ $(document).on('input', 'input[type=range].facepaintoverlay', function(evt) {
     }
     updateHeadOverlay(id, pairedId, $(this).val(), selected.data('index'), true);
     if (type == 'makeup') {
-        $.post('https://cui_character/syncFacepaintOpacity', JSON.stringify({
+        $.post('https://qb-cui_character/syncFacepaintOpacity', JSON.stringify({
             prevtype: 'makeup',
             currenttype: 'blush',
         }));
     }
     else if (type == 'blush') {
-        $.post('https://cui_character/syncFacepaintOpacity', JSON.stringify({
+        $.post('https://qb-cui_character/syncFacepaintOpacity', JSON.stringify({
             prevtype: 'blush',
             currenttype: 'makeup',
         }));
@@ -982,11 +982,11 @@ $(document).on('change', '.palette.overlaycolor input:radio', function(evt) {
 
 $(document).on('change', 'select.makeuptype', function(evt) {
     let value = $(this).find('option:selected').val();
-    $.post('https://cui_character/clearMakeup', JSON.stringify({
+    $.post('https://qb-cui_character/clearMakeup', JSON.stringify({
         clearopacity: true,
         clearblusher: true,
     }));
-    $.post('https://cui_character/updateMakeupType', JSON.stringify({type:value}));
+    $.post('https://qb-cui_character/updateMakeupType', JSON.stringify({type:value}));
 });
 
 // clothing components

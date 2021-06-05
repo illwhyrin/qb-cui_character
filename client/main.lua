@@ -1,117 +1,266 @@
-ESX = nil
+QBCore = nil
 isInterfaceOpening = false
 isModelLoaded = false
-
 isPlayerReady = false
---[[    NOTE: (on player initialization)
+local initialized = false
+local openTabs = {}
+local currentTab = nil
+local isVisible = false
+local isCancelable = true
+local playerLoaded = false
+local firstSpawn = true
+local preparingSkin = true
+local isPlayerNew = false
+local currentChar = {}
+local oldChar = {}
+local isOnDuty = false
 
-        The way es_extended spawns player causes the ped to start a little above ground
-        and 'fall down'. Since our camera position is based off of ped position, 
-        if we open the ui too early during player's first login, the camera will be pointing 'too high'.
+-- Framework
 
-        Unfortunately, I did not find a way to detect when that fall is finished, so I decided
-        to black out the screen and wait a few seconds (if the special animation is disabled).
+Citizen.CreateThread(function()
+    while QBCore == nil do
+        TriggerEvent('QBCore:GetObject', function(obj) QBCore = obj end)
+        Citizen.Wait(200)
+    end
+end)
 
-        This ensures the player will not see that fall or the model being changed from es_extended default.
-]]--
-function PreparePlayer()
-    if Config.EnterCityAnimation then
-        if not IsScreenFadedOut() then
-            DoScreenFadeOut(0)
-        end
+-- Player Loaded Event
 
-        while not isModelLoaded do
-            Citizen.Wait(0)
-        end
+RegisterNetEvent('QBCore:Client:OnPlayerLoaded')
+AddEventHandler('QBCore:Client:OnPlayerLoaded', function()
+    isPlayerReady = true
+    CreateBlips()
+    TriggerServerEvent('cui_character:requestPlayerData')
+end)
 
-        playerPed = PlayerPedId()
-        SwitchOutPlayer(playerPed, 0, 1)
+-- Player Unload Event
 
-        while GetPlayerSwitchState() ~= 5 do
-            Citizen.Wait(0)
-        end
+RegisterNetEvent('QBCore:Client:OnPlayerUnload')
+AddEventHandler('QBCore:Client:OnPlayerUnload', function()
+    isPlayerReady = false
+end)
 
-        DoScreenFadeIn(500)
-        while not IsScreenFadedIn() do
-            Citizen.Wait(0)
-        end
+-- Events
 
-        SwitchInPlayer(playerPed)
-
-        while GetPlayerSwitchState() ~= 12 do
-            Citizen.Wait(0)
-        end
-    else
-        --TODO: Possibly use a more refined first login detection (event from server) if this does not cut it.
-        if not IsScreenFadedOut() then
-            DoScreenFadeOut(0)
-        end
-        Citizen.Wait(7500)
-        DoScreenFadeIn(500)
+RegisterNetEvent('cui_character:open')
+AddEventHandler('cui_character:open', function(tabs, cancelable)
+    if isOnDuty then
+        AddTextEntry('notifyOnDuty', 'You cannot access this command while ~r~on duty~s~.')
+        BeginTextCommandThefeedPost('notifyOnDuty')
+        ThefeedNextPostBackgroundColor(140)
+        EndTextCommandThefeedPostTicker(false, false)
+        isInterfaceOpening = false
+        return
     end
 
-    isPlayerReady = true
-end
+    if isInterfaceOpening then
+        return
+    end
 
-if not Config.ExtendedMode and not Config.StandAlone then
-    AddEventHandler('esx:loadingScreenOff', function()
-        PreparePlayer()
-    end)
-else
-    --[[ TODO: Bring this back if spawnmanager ever gets changed
+    isInterfaceOpening = true
 
-    AddEventHandler('playerSpawned', function()
-        if not isPlayerReady then
-            DoScreenFadeOut(0)
+    if cancelable ~= nil then
+        isCancelable = cancelable
+    end
+
+    while (not initialized) or (not isModelLoaded) or (not isPlayerReady) do
+        Citizen.Wait(100)
+    end
+
+    -- Request textures
+    RequestStreamedTextureDict('mparrow')
+    RequestStreamedTextureDict('mpleaderboard')
+    while not HasStreamedTextureDictLoaded('mparrow') or not HasStreamedTextureDictLoaded('mpleaderboard') do
+        Wait(100)
+    end
+
+    SendNUIMessage({
+        action = 'clearAllTabs'
+    })
+
+    local firstTabName = ''
+    local clothes = nil
+    for i = 0, #openTabs do
+        openTabs[i] = nil
+    end
+
+    for k, v in pairs(tabs) do
+        if k == 1 then
+            firstTabName = v
         end
-    end)
 
-    --]]
-
-    Citizen.CreateThread(function()
-        while GetIsLoadingScreenActive() do
-            Citizen.Wait(100)
+        local tabName = tabs[k]
+        table.insert(openTabs, tabName)
+        if tabName == 'identity' then
+            if not identityLoaded then
+                RequestStreamedTextureDict('pause_menu_pages_char_mom_dad')
+                RequestStreamedTextureDict('char_creator_portraits')
+                while not HasStreamedTextureDictLoaded('pause_menu_pages_char_mom_dad') or not HasStreamedTextureDictLoaded('char_creator_portraits') do
+                    Wait(100)
+                end
+                identityLoaded = true
+            end
+        elseif tabName == 'apparel' then
+            -- load clothes data from natives here
+            clothes = GetClothesData()
         end
-        PreparePlayer()
-    end)
-end
+    end
+
+    SendNUIMessage({
+        action = 'enableTabs',
+        tabs = tabs,
+        character = currentChar,
+        clothes = clothes,
+        identity = currentIdentity
+    })
+
+    SendNUIMessage({
+        action = 'activateTab',
+        tab = firstTabName
+    })
+
+    Camera.Activate()
+
+    SendNUIMessage({
+        action = 'refreshViewButtons',
+        view = Camera.currentView
+    })
+
+    SendNUIMessage({
+        action = 'setCancelable',
+        value = isCancelable
+    })
+
+    setVisible(true)
+    isInterfaceOpening = false
+end)
+
+AddEventHandler('cui_character:close', function(save)
+    if (not save) and (not isCancelable) then
+        return
+    end
+
+    -- Saving and discarding changes
+    if save then
+        local model = GetEntityModel(PlayerPedId())
+        for k, v in pairs(oldChar) do
+            oldChar[k] = currentChar[k]
+        end
+        TriggerServerEvent('cui_character:save', model, currentChar)
+    else
+        LoadCharacter(oldChar)
+    end
+
+    -- Release textures
+    SetStreamedTextureDictAsNoLongerNeeded('mparrow')
+    SetStreamedTextureDictAsNoLongerNeeded('mpleaderboard')
+    if identityLoaded == true then
+        SetStreamedTextureDictAsNoLongerNeeded('pause_menu_pages_char_mom_dad')
+        SetStreamedTextureDictAsNoLongerNeeded('char_creator_portraits')
+        identityLoaded = false
+    end
+
+    Camera.Deactivate()
+
+    isCancelable = true
+    setVisible(false)
+
+    for i = 0, #openTabs do
+        openTabs[i] = nil
+    end
+end)
+
+AddEventHandler('cui_character:getCurrentClothes', function(cb)
+    local result = {}
+
+    result.sex = currentChar.sex
+    result.tshirt_1 = currentChar.tshirt_1
+    result.tshirt_2 = currentChar.tshirt_2
+    result.torso_1 = currentChar.torso_1
+    result.torso_2 = currentChar.torso_2
+    result.decals_1 = currentChar.decals_1
+    result.decals_2 = currentChar.decals_2
+    result.arms = currentChar.arms
+    result.arms_2 = currentChar.arms_2
+    result.pants_1 = currentChar.pants_1
+    result.pants_2 = currentChar.pants_2
+    result.shoes_1 = currentChar.shoes_1
+    result.shoes_2 = currentChar.shoes_2
+    result.mask_1 = currentChar.mask_1
+    result.mask_2 = currentChar.mask_2
+    result.bproof_1 = currentChar.bproof_1
+    result.bproof_2 = currentChar.bproof_2
+    result.neckarm_1 = currentChar.chain_1 or currentChar.neckarm_1
+    result.neckarm_2 = currentChar.chain_2 or currentChar.neckarm_2
+    result.helmet_1 = currentChar.helmet_1
+    result.helmet_2 = currentChar.helmet_2
+    result.glasses_1 = currentChar.glasses_1
+    result.glasses_2 = currentChar.glasses_2
+    result.lefthand_1 = currentChar.watches_1 or currentChar.lefthand_1
+    result.lefthand_2 = currentChar.watches_2 or currentChar.lefthand_2
+    result.righthand_1 = currentChar.bracelets_1 or currentChar.righthand_1
+    result.righthand_2 = currentChar.bracelets_2 or currentChar.righthand_2
+    result.bags_1 = currentChar.bags_1
+    result.bags_2 = currentChar.bags_2
+    result.ears_1 = currentChar.ears_1
+    result.ears_2 = currentChar.ears_2
+
+    cb(result)
+end)
+
+AddEventHandler('cui_character:updateClothes', function(data, save, updateOld, callback)
+    UpdateClothes(data, updateOld)
+    if save then
+        local model = GetEntityModel(PlayerPedId())
+        TriggerServerEvent('cui_character:save', model, currentChar)
+    end
+    if callback then
+        callback()
+    end
+end)
+
+RegisterNetEvent('cui_character:recievePlayerData')
+AddEventHandler('cui_character:recievePlayerData', function(playerData)
+    isPlayerNew = playerData.newPlayer
+    if not isPlayerNew then
+        oldChar = playerData.skin
+        LoadCharacter(playerData.skin)
+    else
+        oldChar = GetDefaultCharacter(true)
+        LoadCharacter(oldChar)
+    end
+    preparingSkin = false
+    playerLoaded = true
+end)
+
+-- Threads
+
+Citizen.CreateThread(function()
+    while preparingSkin do
+        Citizen.Wait(100)
+    end
+    TriggerEvent('cui_character:playerPrepared', isPlayerNew)
+    firstSpawn = false
+
+    while not initialized do
+        SendNUIMessage({
+            action = 'loadInitData',
+            hair = GetColorData(GetHairColors(), true),
+            lipstick = GetColorData(GetLipstickColors(), false),
+            facepaint = GetColorData(GetFacepaintColors(), false),
+            blusher = GetColorData(GetBlusherColors(), false),
+            naturaleyecolors = Config.UseNaturalEyeColors,
+        })
+
+        initialized = true
+        Citizen.Wait(100)
+    end
+end)
+
+-- Functions
 
 function IsPlayerFullyLoaded()
     return isPlayerReady
-end
-
-local initialized = false
-
-local openTabs = {}
-local currentTab = nil
-
-local isVisible = false
-local isCancelable = true
-
-local playerLoaded = false
-local firstSpawn = true
-local identityLoaded = false
-local preparingSkin = true
-local isPlayerNew = false
-
-local currentChar = {}
-local oldChar = {}
-local oldLoadout = {}
-
-local currentIdentity = nil
-
-local isOnDuty = false
-function SetOnDutyStatus(value)
-    isOnDuty = value
-end
-
-if not Config.StandAlone then
-    Citizen.CreateThread(function()
-        while ESX == nil do
-            TriggerEvent('esx:getSharedObject', function(obj) ESX = obj end)
-            Citizen.Wait(0)
-        end
-    end)
 end
 
 function setVisible(visible)
@@ -141,30 +290,6 @@ function ResetAllTabs()
     })
 end
 
-function GetLoadout()
-    local result = {}
-    if not Config.StandAlone then
-        local dataLoaded = false
-        ESX.TriggerServerCallback('esx:getPlayerData', function(data)
-            if data ~= nil then
-                result = data.loadout
-            end
-            dataLoaded = true
-        end)
-
-        while not dataLoaded do
-            Citizen.Wait(100)
-        end
-    end
-
-    return result
-end
-
--- skinchanger/esx_skin replacements
---[[ 
-    Unlike skinchanger, this loads only clothes and does not 
-    re-load other parts of your character (that did not change)
---]]
 function UpdateClothes(data, updateOld)
     local playerPed = PlayerPedId()
 
@@ -275,646 +400,6 @@ function UpdateClothes(data, updateOld)
         SetPedPropIndex(playerPed, 2, currentChar.ears_1, currentChar.ears_2, 2)
     end
 end
-
-RegisterNetEvent('skinchanger:loadClothes')
-AddEventHandler('skinchanger:loadClothes', function(playerSkin, clothesSkin)
-    UpdateClothes(clothesSkin, false)
-end)
-
-RegisterNetEvent('skinchanger:loadSkin')
-AddEventHandler('skinchanger:loadSkin', function(skin, cb)
-    local newChar = GetDefaultCharacter(skin['sex'] == 0)
-
-    -- corrections for changed data format and names
-    local changed = {}
-    changed.chain_1 = 'neckarm_1'
-    changed.chain_2 = 'neckarm_2'
-    changed.watches_1 = 'lefthand_1'
-    changed.watches_2 = 'lefthand_2'
-    changed.bracelets_1 = 'righthand_1'
-    changed.bracelets_2 = 'righthand_2'
-
-    for k, v in pairs(skin) do
-        if k ~= 'face' and k ~= 'skin' then
-            if changed[k] == nil then
-                newChar[k] = v
-            else
-                newChar[changed[k]] = v
-            end
-        end
-    end
-
-    oldLoadout = GetLoadout()
-    LoadCharacter(newChar, false, cb)
-end)
-
-AddEventHandler('skinchanger:loadDefaultModel', function(loadMale, cb)
-    local defaultChar = GetDefaultCharacter(loadMale)
-    oldLoadout = GetLoadout()
-    LoadCharacter(defaultChar, false, cb)
-end)
-
-AddEventHandler('skinchanger:change', function(key, val)
-    --[[
-            IMPORTANT: This is provided only for compatibility reasons.
-            It's VERY inefficient as it reloads entire character for a single change.
-
-            DON'T USE IT.
-    ]]
-    
-    local changed = {}
-    changed.chain_1 = 'neckarm_1'
-    changed.chain_2 = 'neckarm_2'
-    changed.watches_1 = 'lefthand_1'
-    changed.watches_2 = 'lefthand_2'
-    changed.bracelets_1 = 'righthand_1'
-    changed.bracelets_2 = 'righthand_2'
-
-    if key ~= 'face' and key ~= 'skin' then
-        if changed[key] == nil then
-            currentChar[key] = val
-        else
-            currentChar[changed[key]] = val
-        end
-
-        -- TODO: (!) Rewrite this to only load changed part.
-        oldLoadout = GetLoadout()
-        LoadCharacter(currentChar, false, cb)
-    end
-end)
-
-AddEventHandler('skinchanger:getSkin', function(cb)
-    cb(currentChar)
-end)
-
-AddEventHandler('skinchanger:modelLoaded', function()
-    -- empty for now, no idea what it's purpose really is
-end)
-
-AddEventHandler('cui_character:close', function(save)
-    if (not save) and (not isCancelable) then
-        return
-    end
-
-    -- Saving and discarding changes
-    if save then
-        for k, v in pairs(oldChar) do
-            oldChar[k] = currentChar[k]
-        end
-        TriggerServerEvent('cui_character:save', currentChar)
-    else
-        LoadCharacter(oldChar)
-    end
-
-    -- Release textures
-    SetStreamedTextureDictAsNoLongerNeeded('mparrow')
-    SetStreamedTextureDictAsNoLongerNeeded('mpleaderboard')
-    if identityLoaded == true then
-        SetStreamedTextureDictAsNoLongerNeeded('pause_menu_pages_char_mom_dad')
-        SetStreamedTextureDictAsNoLongerNeeded('char_creator_portraits')
-        identityLoaded = false
-    end
-
-    Camera.Deactivate()
-
-    isCancelable = true
-    setVisible(false)
-
-    for i = 0, #openTabs do
-        openTabs[i] = nil
-    end
-end)
-
-RegisterNetEvent('cui_character:open')
-AddEventHandler('cui_character:open', function(tabs, cancelable)
-    if isOnDuty then
-        AddTextEntry('notifyOnDuty', 'You cannot access this command while ~r~on duty~s~.')
-        BeginTextCommandThefeedPost('notifyOnDuty')
-        ThefeedNextPostBackgroundColor(140)
-        EndTextCommandThefeedPostTicker(false, false)
-        isInterfaceOpening = false
-        return
-    end
-
-    if isInterfaceOpening then
-        return
-    end
-
-    isInterfaceOpening = true
-
-    if cancelable ~= nil then
-        isCancelable = cancelable
-    end
-
-    while (not initialized) or (not isModelLoaded) or (not isPlayerReady) do
-        Citizen.Wait(100)
-    end
-
-    if not Config.StandAlone then
-        oldLoadout = GetLoadout()
-    end
-
-    -- Request textures
-    RequestStreamedTextureDict('mparrow')
-    RequestStreamedTextureDict('mpleaderboard')
-    while not HasStreamedTextureDictLoaded('mparrow') or not HasStreamedTextureDictLoaded('mpleaderboard') do
-        Wait(100)
-    end
-
-    SendNUIMessage({
-        action = 'clearAllTabs'
-    })
-
-    local firstTabName = ''
-    local clothes = nil
-    for i = 0, #openTabs do
-        openTabs[i] = nil
-    end
-
-    for k, v in pairs(tabs) do
-        if k == 1 then
-            firstTabName = v
-        end
-
-        local tabName = tabs[k]
-        table.insert(openTabs, tabName)
-        if tabName == 'identity' then
-            if not identityLoaded then
-                RequestStreamedTextureDict('pause_menu_pages_char_mom_dad')
-                RequestStreamedTextureDict('char_creator_portraits')
-                while not HasStreamedTextureDictLoaded('pause_menu_pages_char_mom_dad') or not HasStreamedTextureDictLoaded('char_creator_portraits') do
-                    Wait(100)
-                end
-                identityLoaded = true
-            end
-        elseif tabName == 'apparel' then
-            -- load clothes data from natives here
-            clothes = GetClothesData()
-        end
-    end
-
-    SendNUIMessage({
-        action = 'enableTabs',
-        tabs = tabs,
-        character = currentChar,
-        clothes = clothes,
-        identity = currentIdentity
-    })
-
-    SendNUIMessage({
-        action = 'activateTab',
-        tab = firstTabName
-    })
-
-    Camera.Activate()
-
-    SendNUIMessage({
-        action = 'refreshViewButtons',
-        view = Camera.currentView
-    })
-
-    SendNUIMessage({
-        action = 'setCancelable',
-        value = isCancelable
-    })
-
-    setVisible(true)
-    isInterfaceOpening = false
-end)
-
-AddEventHandler('cui_character:playerPrepared', function(newplayer)
-    if newplayer and (not Config.EnableESXIdentityIntegration) then
-        TriggerEvent('cui_character:open', { 'identity', 'features', 'style', 'apparel' }, false)
-    end
-end)
-
-AddEventHandler('cui_character:getCurrentClothes', function(cb)
-    local result = {}
-
-    result.sex = currentChar.sex
-    result.tshirt_1 = currentChar.tshirt_1
-    result.tshirt_2 = currentChar.tshirt_2
-    result.torso_1 = currentChar.torso_1
-    result.torso_2 = currentChar.torso_2
-    result.decals_1 = currentChar.decals_1
-    result.decals_2 = currentChar.decals_2
-    result.arms = currentChar.arms
-    result.arms_2 = currentChar.arms_2
-    result.pants_1 = currentChar.pants_1
-    result.pants_2 = currentChar.pants_2
-    result.shoes_1 = currentChar.shoes_1
-    result.shoes_2 = currentChar.shoes_2
-    result.mask_1 = currentChar.mask_1
-    result.mask_2 = currentChar.mask_2
-    result.bproof_1 = currentChar.bproof_1
-    result.bproof_2 = currentChar.bproof_2
-    result.neckarm_1 = currentChar.chain_1 or currentChar.neckarm_1
-    result.neckarm_2 = currentChar.chain_2 or currentChar.neckarm_2
-    result.helmet_1 = currentChar.helmet_1
-    result.helmet_2 = currentChar.helmet_2
-    result.glasses_1 = currentChar.glasses_1
-    result.glasses_2 = currentChar.glasses_2
-    result.lefthand_1 = currentChar.watches_1 or currentChar.lefthand_1
-    result.lefthand_2 = currentChar.watches_2 or currentChar.lefthand_2
-    result.righthand_1 = currentChar.bracelets_1 or currentChar.righthand_1
-    result.righthand_2 = currentChar.bracelets_2 or currentChar.righthand_2
-    result.bags_1 = currentChar.bags_1
-    result.bags_2 = currentChar.bags_2
-    result.ears_1 = currentChar.ears_1
-    result.ears_2 = currentChar.ears_2
-
-    cb(result)
-end)
-
-AddEventHandler('cui_character:updateClothes', function(data, save, updateOld, callback)
-    UpdateClothes(data, updateOld)
-    if save then
-        TriggerServerEvent('cui_character:save', currentChar)
-    end
-    if callback then
-        callback()
-    end
-end)
-
-if not Config.StandAlone then
-    RegisterNetEvent('esx:playerLoaded')
-    AddEventHandler('esx:playerLoaded', function(xPlayer)
-        playerLoaded = true
-    end)
-
-    AddEventHandler('esx:onPlayerSpawn', function()
-        Citizen.CreateThread(function()
-            while not playerLoaded do
-                Citizen.Wait(100)
-            end
-
-            if firstSpawn then
-                oldLoadout = GetLoadout()
-                ESX.TriggerServerCallback('esx_skin:getPlayerSkin', function(skin)
-                    if skin ~= nil then
-                        oldChar = skin
-                        LoadCharacter(skin)
-                    else
-                        oldChar = GetDefaultCharacter(true)
-                        LoadCharacter(oldChar)
-                        isPlayerNew = true
-                    end
-                    preparingSkin = false
-                end)
-
-                if Config.EnableESXIdentityIntegration then
-                    local preparingIndentity = true
-                    ESX.TriggerServerCallback('cui_character:getIdentity', function(identity)
-                        if identity ~= nil then
-                            LoadIdentity(identity)
-                        end
-                        preparingIndentity = false
-                    end)
-                    while preparingIdentity do
-                        Citizen.Wait(100)
-                    end
-                end
-            end
-        end)
-    end)
-
--- StandAlone Deployment
-else
-    AddEventHandler('onClientResourceStart', function(resource)
-        if resource == GetCurrentResourceName() then
-            Citizen.CreateThread(function()
-                Citizen.Wait(250)
-                TriggerServerEvent('cui_character:requestPlayerData')
-                print("Requested player data")
-            end)
-        end
-    end)
-
-    RegisterNetEvent('cui_character:recievePlayerData')
-    AddEventHandler('cui_character:recievePlayerData', function(playerData)
-        isPlayerNew = playerData.newPlayer
-        if not isPlayerNew then
-            oldChar = playerData.skin
-            LoadCharacter(playerData.skin)
-        else
-            oldChar = GetDefaultCharacter(true)
-            LoadCharacter(oldChar)
-        end
-        preparingSkin = false
-        playerLoaded = true
-        ShutdownLoadingScreen()
-        ShutdownLoadingScreenNui()
-    end)
-end
-
-Citizen.CreateThread(function()
-    while preparingSkin do
-        Citizen.Wait(100)
-    end
-    TriggerEvent('cui_character:playerPrepared', isPlayerNew)
-    firstSpawn = false
-
-    while not initialized do
-        SendNUIMessage({
-            action = 'loadInitData',
-            hair = GetColorData(GetHairColors(), true),
-            lipstick = GetColorData(GetLipstickColors(), false),
-            facepaint = GetColorData(GetFacepaintColors(), false),
-            blusher = GetColorData(GetBlusherColors(), false),
-            naturaleyecolors = Config.UseNaturalEyeColors,
-
-            -- esx identity integration
-            esxidentity = Config.EnableESXIdentityIntegration,
-            identitylimits = {
-                namemax = Config.MaxNameLength,
-                heightmin = Config.MinHeight,
-                heightmax = Config.MaxHeight,
-                yearmin = Config.LowestYear,
-                yearmax = Config.HighestYear
-            },
-        })
-
-        initialized = true
-        Citizen.Wait(100)
-    end
-end)
-
-RegisterNUICallback('setCameraView', function(data, cb)
-    Camera.SetView(data['view'])
-end)
-
-RegisterNUICallback('updateCameraRotation', function(data, cb)
-    Camera.mouseX = tonumber(data['x'])
-    Camera.mouseY = tonumber(data['y'])
-    Camera.updateRot = true
-end)
-
-RegisterNUICallback('updateCameraZoom', function(data, cb)
-    Camera.radius = Camera.radius + (tonumber(data['zoom']))
-    Camera.updateZoom = true
-end)
-
-RegisterNUICallback('playSound', function(data, cb)
-    local sound = data['sound']
-
-    if sound == 'tabchange' then
-        PlaySoundFrontend(-1, 'Continue_Appears', 'DLC_HEIST_PLANNING_BOARD_SOUNDS', 1)
-    elseif sound == 'mouseover' then
-        PlaySoundFrontend(-1, 'Faster_Click', 'RESPAWN_ONLINE_SOUNDSET', 1)
-    elseif sound == 'panelbuttonclick' then
-        PlaySoundFrontend(-1, 'Reset_Prop_Position', 'DLC_Dmod_Prop_Editor_Sounds', 0)
-    elseif sound == 'optionchange' then
-        PlaySoundFrontend(-1, 'HACKING_MOVE_CURSOR', 0, 1)
-    end
-end)
-
-RegisterNUICallback('setCurrentTab', function(data, cb)
-    currentTab = data['tab']
-end)
-
-RegisterNUICallback('close', function(data, cb)
-    TriggerEvent('cui_character:close', data['save'])
-end)
-
-RegisterNUICallback('updateMakeupType', function(data, cb)
-    --[[
-            NOTE:   This is a pure control variable that does not call any natives.
-                    It only modifies which options are going to be visible in the ui.
-
-                    Since face paint replaces blusher and eye makeup,
-                    we need to save in the database which type the player selected:
-
-                    0 - 'None',
-                    1 - 'Eye Makeup',
-                    2 - 'Face Paint'
-    ]]--
-    local type = tonumber(data['type'])
-    currentChar['makeup_type'] = type
-
-    SendNUIMessage({
-        action = 'refreshMakeup',
-        character = currentChar
-    })
-end)
-
-RegisterNUICallback('syncFacepaintOpacity', function(data, cb)
-    local prevtype = data['prevtype']
-    local currenttype = data['currenttype']
-    local prevopacity = prevtype .. '_2'
-    local currentopacity = currenttype .. '_2'
-    currentChar[currentopacity] = currentChar[prevopacity]
-end)
-
-RegisterNUICallback('clearMakeup', function(data, cb)
-    if data['clearopacity'] then
-        currentChar['makeup_2'] = 100
-        if data['clearblusher'] then
-            currentChar['blush_2'] = 100
-        end
-    end
-
-    currentChar['makeup_1'] = 255
-    currentChar['makeup_3'] = 255
-    currentChar['makeup_4'] = 255
-
-    local playerPed = PlayerPedId()
-    SetPedHeadOverlay(playerPed, 4, currentChar.makeup_1, currentChar.makeup_2 / 100 + 0.0) -- Eye Makeup
-    SetPedHeadOverlayColor(playerPed, 4, 0, currentChar.makeup_3, currentChar.makeup_4)     -- Eye Makeup Color
-
-    if data['clearblusher'] then
-        currentChar['blush_1'] = 255
-        currentChar['blush_3'] = 0
-        SetPedHeadOverlay(playerPed, 5, currentChar.blush_1, currentChar.blush_2 / 100 + 0.0)   -- Blusher
-        SetPedHeadOverlayColor(playerPed, 5, 2, currentChar.blush_3, 255)                       -- Blusher Color
-    end
-end)
-
-RegisterNUICallback('updateGender', function(data, cb)
-    local value = tonumber(data['value'])
-    ClearAllAnimations()
-    LoadCharacter(GetDefaultCharacter(value == 0), true)
-    ResetAllTabs()
-end)
-
-RegisterNUICallback('updateHeadBlend', function(data, cb)
-    local key = data['key']
-    local value = tonumber(data['value'])
-    currentChar[key] = value
-
-    local weightFace = currentChar.face_md_weight / 100 + 0.0
-    local weightSkin = currentChar.skin_md_weight / 100 + 0.0
-
-    local playerPed = PlayerPedId()
-    SetPedHeadBlendData(playerPed, currentChar.mom, currentChar.dad, 0, currentChar.mom, currentChar.dad, 0, weightFace, weightSkin, 0.0, false)
-end)
-
-RegisterNUICallback('updateFaceFeature', function(data, cb)
-    local key = data['key']
-    local value = tonumber(data['value'])
-    local index = tonumber(data['index'])
-    currentChar[key] = value
-
-    local playerPed = PlayerPedId()
-    SetPedFaceFeature(playerPed, index, (currentChar[key] / 100) + 0.0)
-end)
-
-RegisterNUICallback('updateEyeColor', function(data, cb)
-    local value = tonumber(data['value'])
-    currentChar['eye_color'] = value
-
-    local playerPed = PlayerPedId()
-    SetPedEyeColor(playerPed, currentChar.eye_color)
-end)
-
-RegisterNUICallback('updateHairColor', function(data, cb)
-    local key = data['key']
-    local value = tonumber(data['value'])
-    local highlight = data['highlight']
-    currentChar[key] = value
-
-    local playerPed = PlayerPedId()
-    if highlight then
-        SetPedHairColor(playerPed, currentChar['hair_color_1'], currentChar[key])
-    else
-        SetPedHairColor(playerPed, currentChar[key], currentChar['hair_color_2'])
-    end
-end)
-
-RegisterNUICallback('updateHeadOverlay', function(data, cb)
-    local key = data['key']
-    local keyPaired = data['keyPaired']
-    local value = tonumber(data['value'])
-    local index = tonumber(data['index'])
-    local isOpacity = (data['isOpacity'])
-    currentChar[key] = value
-
-    local playerPed = PlayerPedId()
-    if isOpacity then
-        SetPedHeadOverlay(playerPed, index, currentChar[keyPaired], currentChar[key] / 100 + 0.0)
-    else
-        SetPedHeadOverlay(playerPed, index, currentChar[key], currentChar[keyPaired] / 100 + 0.0)
-    end
-end)
-
-RegisterNUICallback('updateHeadOverlayExtra', function(data, cb)
-    local key = data['key']
-    local keyPaired = data['keyPaired']
-    local value = tonumber(data['value'])
-    local index = tonumber(data['index'])
-    local keyExtra = data['keyExtra']
-    local valueExtra = tonumber(data['valueExtra'])
-    local indexExtra = tonumber(data['indexExtra'])
-    local isOpacity = (data['isOpacity'])
-
-    currentChar[key] = value
-
-    local playerPed = PlayerPedId()
-    if isOpacity then
-        currentChar[keyExtra] = value
-        SetPedHeadOverlay(playerPed, index, currentChar[keyPaired], currentChar[key] / 100 + 0.0)
-        SetPedHeadOverlay(playerPed, indexExtra, valueExtra, currentChar[key] / 100 + 0.0)
-    else
-        currentChar[keyExtra] = valueExtra
-        SetPedHeadOverlay(playerPed, index, currentChar[key], currentChar[keyPaired] / 100 + 0.0)
-        SetPedHeadOverlay(playerPed, indexExtra, currentChar[keyExtra], currentChar[keyPaired] / 100 + 0.0)
-    end
-end)
-
-RegisterNUICallback('updateOverlayColor', function(data, cb)
-    local key = data['key']
-    local value = tonumber(data['value'])
-    local index = tonumber(data['index'])
-    local colortype = tonumber(data['colortype'])
-    currentChar[key] = value
-
-    local playerPed = PlayerPedId()
-    SetPedHeadOverlayColor(playerPed, index, colortype, currentChar[key])
-end)
-
-RegisterNUICallback('updateComponent', function(data, cb)
-    local drawableKey = data['drawable']
-    local drawableValue = tonumber(data['dvalue'])
-    local textureKey = data['texture']
-    local textureValue = tonumber(data['tvalue'])
-    local index = tonumber(data['index'])
-    currentChar[drawableKey] = drawableValue
-    currentChar[textureKey] = textureValue
-
-    local playerPed = PlayerPedId()
-    SetPedComponentVariation(playerPed, index, currentChar[drawableKey], currentChar[textureKey], 2)
-end)
-
-RegisterNUICallback('updateApparelComponent', function(data, cb)
-    local drawableKey = data['drwkey']
-    local textureKey = data['texkey']
-    local component = tonumber(data['cmpid'])
-    currentChar[drawableKey] = tonumber(data['drwval'])
-    currentChar[textureKey] = tonumber(data['texval'])
-
-    local playerPed = PlayerPedId()
-    SetPedComponentVariation(playerPed, component, currentChar[drawableKey], currentChar[textureKey], 2)
-
-    -- Some clothes have 'forced components' that change torso and other parts.
-    -- adapted from: https://gist.github.com/root-cause/3b80234367b0c856d60bf5cb4b826f86
-    local hash = GetHashNameForComponent(playerPed, component, currentChar[drawableKey], currentChar[textureKey])
-    --print('main component hash ' .. hash)
-    local fcDrawable, fcTexture, fcType = -1, -1, -1
-    local fcCount = GetShopPedApparelForcedComponentCount(hash) - 1
-    --print('found ' .. fcCount + 1 .. ' forced components')
-    for fcId = 0, fcCount do
-        local fcNameHash, fcEnumVal, f5, f7, f8 = -1, -1, -1, -1, -1
-        fcNameHash, fcEnumVal, fcType = GetForcedComponent(hash, fcId)
-        --print('forced component [' .. fcId .. ']: nameHash: ' .. fcNameHash .. ', enumVal: ' .. fcEnumVal .. ', type: ' .. fcType--[[.. ', field5: ' .. f5 .. ', field7: ' .. f7 .. ', field8: ' .. f8 --]])
-
-        -- only set torsos, using other types here seems to glitch out
-        if fcType == 3 then
-            if (fcNameHash == 0) or (fcNameHash == GetHashKey('0')) then
-                fcDrawable = fcEnumVal
-                fcTexture = 0
-            else
-                fcType, fcDrawable, fcTexture = GetComponentDataFromHash(fcNameHash)
-            end
-
-            -- Apply component to ped, save it in current character data
-            if IsPedComponentVariationValid(playerPed, fcType, fcDrawable, fcTexture) then
-                currentChar['arms'] = fcDrawable
-                currentChar['arms_2'] = fcTexture
-                SetPedComponentVariation(playerPed, fcType, fcDrawable, fcTexture, 2)
-            end
-        end
-    end
-
-    -- Forced components do not pick proper torso for 'None' variant, need manual correction
-    if GetEntityModel(playerPed) == GetHashKey('mp_f_freemode_01') then
-        if (GetPedDrawableVariation(playerPed, 11) == 15) and (GetPedTextureVariation(playerPed, 11) == 16) then
-            currentChar['arms'] = 15
-            currentChar['arms_2'] = 0
-            SetPedComponentVariation(playerPed, 3, 15, 0, 2);
-        end
-    elseif GetEntityModel(playerPed) == GetHashKey('mp_m_freemode_01') then
-        if (GetPedDrawableVariation(playerPed, 11) == 15) and (GetPedTextureVariation(playerPed, 11) == 0) then
-            currentChar['arms'] = 15
-            currentChar['arms_2'] = 0
-            SetPedComponentVariation(playerPed, 3, 15, 0, 2);
-        end
-    end
-end)
-
-RegisterNUICallback('updateApparelProp', function(data, cb)
-    local drawableKey = data['drwkey']
-    local textureKey = data['texkey']
-    local prop = tonumber(data['propid'])
-    currentChar[drawableKey] = tonumber(data['drwval'])
-    currentChar[textureKey] = tonumber(data['texval'])
-
-    local playerPed = PlayerPedId()
-
-    if currentChar[drawableKey] == -1 then
-        ClearPedProp(playerPed, prop)
-    else
-        SetPedPropIndex(playerPed, prop, currentChar[drawableKey], currentChar[textureKey], false)
-    end
-end)
 
 function GetHairColors()
     local result = {}
@@ -1491,200 +976,368 @@ function LoadCharacter(data, playIdleWhenLoaded, callback)
         SetPedPropIndex (playerPed, 2, data.ears_1, data.ears_2, 2)             -- Ear Accessory
     end
 
-    if not Config.StandAlone then
-        ESX.SetPlayerData('loadout', oldLoadout)
-        TriggerEvent('esx:restoreLoadout')
-    end
-
     if callback ~= nil then
         callback()
     end
 end
 
 -- Map Locations
-local closestCoords = nil
-local closestType = ''
-local distToClosest = 1000.0
-local inMarkerRange = false
 
 function DisplayTooltip(suffix)
     SetTextComponentFormat('STRING')
-    AddTextComponentString('Press ~INPUT_PICKUP~ to ' .. suffix)
+    AddTextComponentString('Press ~INPUT_PICKUP~ To ' .. suffix)
     DisplayHelpTextFromStringLabel(0, 0, 1, -1)
 end
 
-function UpdateClosestLocation(locations, type)
-    local pedPosition = GetEntityCoords(PlayerPedId())
-    for i = 1, #locations do
-        local loc = locations[i]
-        local distance = GetDistanceBetweenCoords(pedPosition.x, pedPosition.y, pedPosition.z, loc[1], loc[2], loc[3], false)
-        if (distToClosest == nil or closestCoords == nil) or (distance < distToClosest) or (closestCoords == loc) then
-            distToClosest = distance
-            closestType = type
-            closestCoords = vector3(loc[1], loc[2], loc[3])
-        end
-
-        if (distToClosest < 20.0) and (distToClosest > 1.0) then
-            inMarkerRange = true
-        else
-            inMarkerRange = false
-        end
-    end
-end
-
-Citizen.CreateThread(function()
+CreateThread(function()
     while true do
-        if Config.EnableClothingShops then
-            UpdateClosestLocation(Config.ClothingShops, 'clothing')
-        end
+        Wait(1)
+        local sleep = true
+        local playerCoords = GetEntityCoords(PlayerPedId())
 
-        if Config.EnableBarberShops then
-            UpdateClosestLocation(Config.BarberShops, 'barber')
-        end
-
-        if Config.EnablePlasticSurgeryUnits then
-            UpdateClosestLocation(Config.PlasticSurgeryUnits, 'surgery')
-        end
-
-        if Config.EnableNewIdentityProviders then
-            UpdateClosestLocation(Config.NewIdentityProviders, 'identity')
-        end
-        Citizen.Wait(500)
-    end
-end)
-
-Citizen.CreateThread(function()
-    while true do
-        --  TODO: make nearby players invisible while using these,
-        --  use https://runtime.fivem.net/doc/natives/?_0xE135A9FF3F5D05D8
-        --  TODO: possibly charge money for use
-
-        if inMarkerRange then
-            DrawMarker(
-                20,
-                closestCoords.x, closestCoords.y, closestCoords.z + 1.0,
-                0.0, 0.0, 0.0,
-                0.0, 0.0, 0.0,
-                1.0, 1.0, 1.0,
-                45, 110, 185, 128,
-                true,   -- move up and down
-                false,
-                2,
-                true,  -- rotate
-                nil,
-                nil,
-                false
-            )
-        end
-
-        if distToClosest < 1.0 and (not isVisible) then
-            if isOnDuty then
-                SetTextComponentFormat('STRING')
-                AddTextComponentString('You cannot access this while ~r~on duty~s~.')
-                DisplayHelpTextFromStringLabel(0, 0, 1, -1)
-            else
-                if closestType == 'clothing' then
-                    DisplayTooltip('use clothing store.')
-                    if IsControlJustPressed(1, 38) then
-                        TriggerEvent('cui_character:open', { 'apparel' })
-                    end
-                elseif closestType == 'barber' then
-                    DisplayTooltip('use barber shop.')
-                    if IsControlJustPressed(1, 38) then
-                        TriggerEvent('cui_character:open', { 'style' })
-                    end
-                elseif closestType == 'surgery' then
-                    DisplayTooltip('use platic surgery unit.')
-                    if IsControlJustPressed(1, 38) then
-                        TriggerEvent('cui_character:open', { 'features' })
-                    end
-                elseif closestType == 'identity' then
-                    DisplayTooltip('change your identity.')
-                    if IsControlJustPressed(1, 38) then
-                        TriggerEvent('cui_character:open', { 'identity' })
-                    end
+        for i=1, #Config.ClothingShops do
+            local loc = Config.ClothingShops[i]
+            local distance = #(playerCoords - vector3(loc[1], loc[2], loc[3]))
+            if distance < 2.5 then
+                sleep = false
+                DisplayTooltip('Browse Clothing')
+                if IsControlJustPressed(1, 38) then
+                    TriggerEvent('cui_character:open', { 'apparel' })
                 end
             end
         end
-        Citizen.Wait(0)
+
+        for i=1, #Config.BarberShops do
+            local loc = Config.BarberShops[i]
+            local distance = #(playerCoords - vector3(loc[1], loc[2], loc[3]))
+            if distance < 2.5 then
+                sleep = false
+                DisplayTooltip('Browse Hair Styles')
+                if IsControlJustPressed(1, 38) then
+                    TriggerEvent('cui_character:open', { 'style' })
+                end
+            end
+        end
+
+        for i=1, #Config.PlasticSurgeryUnits do
+            local loc = Config.PlasticSurgeryUnits[i]
+            local distance = #(playerCoords - vector3(loc[1], loc[2], loc[3]))
+            if distance < 2.5 then
+                sleep = false
+                DisplayTooltip('Get Plastic Surgery')
+                if IsControlJustPressed(1, 38) then
+                    TriggerEvent('cui_character:open', { 'features' })
+                end
+            end
+        end
+
+        if sleep then
+            Wait(500)
+        end
     end
 end)
 
 -- Map Blips
-if Config.EnableClothingShops then
-    Citizen.CreateThread(function()
-        for k, v in ipairs(Config.ClothingShops) do
-            local blip = AddBlipForCoord(v)
-            SetBlipSprite(blip, 73)
-            SetBlipColour(blip, 84)
-            SetBlipAsShortRange(blip, true)
 
-            BeginTextCommandSetBlipName('STRING')
-            AddTextComponentString('Clothing Store')
-            EndTextCommandSetBlipName(blip)
-        end
-    end)
+function CreateBlips()
+    for k, v in ipairs(Config.ClothingShops) do
+        local blip = AddBlipForCoord(v)
+        SetBlipSprite(blip, 73)
+        SetBlipColour(blip, 84)
+        SetBlipAsShortRange(blip, true)
+
+        BeginTextCommandSetBlipName('STRING')
+        AddTextComponentString('Clothing Store')
+        EndTextCommandSetBlipName(blip)
+    end
+
+    for k, v in ipairs(Config.BarberShops) do
+        local blip = AddBlipForCoord(v)
+        SetBlipSprite(blip, 71)
+        SetBlipColour(blip, 84)
+        SetBlipAsShortRange(blip, true)
+
+        BeginTextCommandSetBlipName('STRING')
+        AddTextComponentString('Barber Shop')
+        EndTextCommandSetBlipName(blip)
+    end
+
+    for k, v in ipairs(Config.PlasticSurgeryUnits) do
+        local blip = AddBlipForCoord(v)
+        SetBlipSprite(blip, 102)
+        SetBlipColour(blip, 84)
+        SetBlipAsShortRange(blip, true)
+
+        BeginTextCommandSetBlipName('STRING')
+        AddTextComponentString('Plastic Surgery Unit')
+        EndTextCommandSetBlipName(blip)
+    end
 end
 
-if Config.EnableBarberShops then
-    Citizen.CreateThread(function()
-        for k, v in ipairs(Config.BarberShops) do
-            local blip = AddBlipForCoord(v)
-            SetBlipSprite(blip, 71)
-            SetBlipColour(blip, 84)
-            SetBlipAsShortRange(blip, true)
+-- NUI
 
-            BeginTextCommandSetBlipName('STRING')
-            AddTextComponentString('Barber Shop')
-            EndTextCommandSetBlipName(blip)
-        end
-    end)
-end
+RegisterNUICallback('setCameraView', function(data, cb)
+    Camera.SetView(data['view'])
+end)
 
-if Config.EnablePlasticSurgeryUnits then
-    Citizen.CreateThread(function()
-        for k, v in ipairs(Config.PlasticSurgeryUnits) do
-            local blip = AddBlipForCoord(v)
-            SetBlipSprite(blip, 102)
-            SetBlipColour(blip, 84)
-            SetBlipAsShortRange(blip, true)
+RegisterNUICallback('updateCameraRotation', function(data, cb)
+    Camera.mouseX = tonumber(data['x'])
+    Camera.mouseY = tonumber(data['y'])
+    Camera.updateRot = true
+end)
 
-            BeginTextCommandSetBlipName('STRING')
-            AddTextComponentString('Platic Surgery Unit')
-            EndTextCommandSetBlipName(blip)
-        end
-    end)
-end
+RegisterNUICallback('updateCameraZoom', function(data, cb)
+    Camera.radius = Camera.radius + (tonumber(data['zoom']))
+    Camera.updateZoom = true
+end)
 
-if Config.EnableNewIdentityProviders then
-    Citizen.CreateThread(function()
-        for k, v in ipairs(Config.NewIdentityProviders) do
-            local blip = AddBlipForCoord(v)
-            SetBlipSprite(blip, 498)
-            SetBlipColour(blip, 84)
-            SetBlipAsShortRange(blip, true)
+RegisterNUICallback('playSound', function(data, cb)
+    local sound = data['sound']
 
-            BeginTextCommandSetBlipName('STRING')
-            AddTextComponentString('Municipal Building')
-            EndTextCommandSetBlipName(blip)
-        end
-    end)
-end
+    if sound == 'tabchange' then
+        PlaySoundFrontend(-1, 'Continue_Appears', 'DLC_HEIST_PLANNING_BOARD_SOUNDS', 1)
+    elseif sound == 'mouseover' then
+        PlaySoundFrontend(-1, 'Faster_Click', 'RESPAWN_ONLINE_SOUNDSET', 1)
+    elseif sound == 'panelbuttonclick' then
+        PlaySoundFrontend(-1, 'Reset_Prop_Position', 'DLC_Dmod_Prop_Editor_Sounds', 0)
+    elseif sound == 'optionchange' then
+        PlaySoundFrontend(-1, 'HACKING_MOVE_CURSOR', 0, 1)
+    end
+end)
 
--- ESX Identity Integration
-if Config.EnableESXIdentityIntegration then
-    function LoadIdentity(data)
-        currentIdentity = {}
-        for k, v in pairs(data) do
-            currentIdentity[k] = v
+RegisterNUICallback('setCurrentTab', function(data, cb)
+    currentTab = data['tab']
+end)
+
+RegisterNUICallback('close', function(data, cb)
+    TriggerEvent('cui_character:close', data['save'])
+end)
+
+RegisterNUICallback('updateMakeupType', function(data, cb)
+    local type = tonumber(data['type'])
+    currentChar['makeup_type'] = type
+
+    SendNUIMessage({
+        action = 'refreshMakeup',
+        character = currentChar
+    })
+end)
+
+RegisterNUICallback('syncFacepaintOpacity', function(data, cb)
+    local prevtype = data['prevtype']
+    local currenttype = data['currenttype']
+    local prevopacity = prevtype .. '_2'
+    local currentopacity = currenttype .. '_2'
+    currentChar[currentopacity] = currentChar[prevopacity]
+end)
+
+RegisterNUICallback('clearMakeup', function(data, cb)
+    if data['clearopacity'] then
+        currentChar['makeup_2'] = 100
+        if data['clearblusher'] then
+            currentChar['blush_2'] = 100
         end
     end
 
-    AddEventHandler('esx_skin:resetFirstSpawn', function()
-        firstSpawn = true
-    end)
+    currentChar['makeup_1'] = 255
+    currentChar['makeup_3'] = 255
+    currentChar['makeup_4'] = 255
 
-    AddEventHandler('cui_character:setCurrentIdentity', function(data)
-        currentIdentity = data
-    end)
-end
+    local playerPed = PlayerPedId()
+    SetPedHeadOverlay(playerPed, 4, currentChar.makeup_1, currentChar.makeup_2 / 100 + 0.0) -- Eye Makeup
+    SetPedHeadOverlayColor(playerPed, 4, 0, currentChar.makeup_3, currentChar.makeup_4)     -- Eye Makeup Color
+
+    if data['clearblusher'] then
+        currentChar['blush_1'] = 255
+        currentChar['blush_3'] = 0
+        SetPedHeadOverlay(playerPed, 5, currentChar.blush_1, currentChar.blush_2 / 100 + 0.0)   -- Blusher
+        SetPedHeadOverlayColor(playerPed, 5, 2, currentChar.blush_3, 255)                       -- Blusher Color
+    end
+end)
+
+RegisterNUICallback('updateGender', function(data, cb)
+    local value = tonumber(data['value'])
+    ClearAllAnimations()
+    LoadCharacter(GetDefaultCharacter(value == 0), true)
+    ResetAllTabs()
+end)
+
+RegisterNUICallback('updateHeadBlend', function(data, cb)
+    local key = data['key']
+    local value = tonumber(data['value'])
+    currentChar[key] = value
+
+    local weightFace = currentChar.face_md_weight / 100 + 0.0
+    local weightSkin = currentChar.skin_md_weight / 100 + 0.0
+
+    local playerPed = PlayerPedId()
+    SetPedHeadBlendData(playerPed, currentChar.mom, currentChar.dad, 0, currentChar.mom, currentChar.dad, 0, weightFace, weightSkin, 0.0, false)
+end)
+
+RegisterNUICallback('updateFaceFeature', function(data, cb)
+    local key = data['key']
+    local value = tonumber(data['value'])
+    local index = tonumber(data['index'])
+    currentChar[key] = value
+
+    local playerPed = PlayerPedId()
+    SetPedFaceFeature(playerPed, index, (currentChar[key] / 100) + 0.0)
+end)
+
+RegisterNUICallback('updateEyeColor', function(data, cb)
+    local value = tonumber(data['value'])
+    currentChar['eye_color'] = value
+
+    local playerPed = PlayerPedId()
+    SetPedEyeColor(playerPed, currentChar.eye_color)
+end)
+
+RegisterNUICallback('updateHairColor', function(data, cb)
+    local key = data['key']
+    local value = tonumber(data['value'])
+    local highlight = data['highlight']
+    currentChar[key] = value
+
+    local playerPed = PlayerPedId()
+    if highlight then
+        SetPedHairColor(playerPed, currentChar['hair_color_1'], currentChar[key])
+    else
+        SetPedHairColor(playerPed, currentChar[key], currentChar['hair_color_2'])
+    end
+end)
+
+RegisterNUICallback('updateHeadOverlay', function(data, cb)
+    local key = data['key']
+    local keyPaired = data['keyPaired']
+    local value = tonumber(data['value'])
+    local index = tonumber(data['index'])
+    local isOpacity = (data['isOpacity'])
+    currentChar[key] = value
+
+    local playerPed = PlayerPedId()
+    if isOpacity then
+        SetPedHeadOverlay(playerPed, index, currentChar[keyPaired], currentChar[key] / 100 + 0.0)
+    else
+        SetPedHeadOverlay(playerPed, index, currentChar[key], currentChar[keyPaired] / 100 + 0.0)
+    end
+end)
+
+RegisterNUICallback('updateHeadOverlayExtra', function(data, cb)
+    local key = data['key']
+    local keyPaired = data['keyPaired']
+    local value = tonumber(data['value'])
+    local index = tonumber(data['index'])
+    local keyExtra = data['keyExtra']
+    local valueExtra = tonumber(data['valueExtra'])
+    local indexExtra = tonumber(data['indexExtra'])
+    local isOpacity = (data['isOpacity'])
+
+    currentChar[key] = value
+
+    local playerPed = PlayerPedId()
+    if isOpacity then
+        currentChar[keyExtra] = value
+        SetPedHeadOverlay(playerPed, index, currentChar[keyPaired], currentChar[key] / 100 + 0.0)
+        SetPedHeadOverlay(playerPed, indexExtra, valueExtra, currentChar[key] / 100 + 0.0)
+    else
+        currentChar[keyExtra] = valueExtra
+        SetPedHeadOverlay(playerPed, index, currentChar[key], currentChar[keyPaired] / 100 + 0.0)
+        SetPedHeadOverlay(playerPed, indexExtra, currentChar[keyExtra], currentChar[keyPaired] / 100 + 0.0)
+    end
+end)
+
+RegisterNUICallback('updateOverlayColor', function(data, cb)
+    local key = data['key']
+    local value = tonumber(data['value'])
+    local index = tonumber(data['index'])
+    local colortype = tonumber(data['colortype'])
+    currentChar[key] = value
+
+    local playerPed = PlayerPedId()
+    SetPedHeadOverlayColor(playerPed, index, colortype, currentChar[key])
+end)
+
+RegisterNUICallback('updateComponent', function(data, cb)
+    local drawableKey = data['drawable']
+    local drawableValue = tonumber(data['dvalue'])
+    local textureKey = data['texture']
+    local textureValue = tonumber(data['tvalue'])
+    local index = tonumber(data['index'])
+    currentChar[drawableKey] = drawableValue
+    currentChar[textureKey] = textureValue
+
+    local playerPed = PlayerPedId()
+    SetPedComponentVariation(playerPed, index, currentChar[drawableKey], currentChar[textureKey], 2)
+end)
+
+RegisterNUICallback('updateApparelComponent', function(data, cb)
+    local drawableKey = data['drwkey']
+    local textureKey = data['texkey']
+    local component = tonumber(data['cmpid'])
+    currentChar[drawableKey] = tonumber(data['drwval'])
+    currentChar[textureKey] = tonumber(data['texval'])
+
+    local playerPed = PlayerPedId()
+    SetPedComponentVariation(playerPed, component, currentChar[drawableKey], currentChar[textureKey], 2)
+
+    -- Some clothes have 'forced components' that change torso and other parts.
+    -- adapted from: https://gist.github.com/root-cause/3b80234367b0c856d60bf5cb4b826f86
+    local hash = GetHashNameForComponent(playerPed, component, currentChar[drawableKey], currentChar[textureKey])
+    --print('main component hash ' .. hash)
+    local fcDrawable, fcTexture, fcType = -1, -1, -1
+    local fcCount = GetShopPedApparelForcedComponentCount(hash) - 1
+    --print('found ' .. fcCount + 1 .. ' forced components')
+    for fcId = 0, fcCount do
+        local fcNameHash, fcEnumVal, f5, f7, f8 = -1, -1, -1, -1, -1
+        fcNameHash, fcEnumVal, fcType = GetForcedComponent(hash, fcId)
+        --print('forced component [' .. fcId .. ']: nameHash: ' .. fcNameHash .. ', enumVal: ' .. fcEnumVal .. ', type: ' .. fcType--[[.. ', field5: ' .. f5 .. ', field7: ' .. f7 .. ', field8: ' .. f8 --]])
+
+        -- only set torsos, using other types here seems to glitch out
+        if fcType == 3 then
+            if (fcNameHash == 0) or (fcNameHash == GetHashKey('0')) then
+                fcDrawable = fcEnumVal
+                fcTexture = 0
+            else
+                fcType, fcDrawable, fcTexture = GetComponentDataFromHash(fcNameHash)
+            end
+
+            -- Apply component to ped, save it in current character data
+            if IsPedComponentVariationValid(playerPed, fcType, fcDrawable, fcTexture) then
+                currentChar['arms'] = fcDrawable
+                currentChar['arms_2'] = fcTexture
+                SetPedComponentVariation(playerPed, fcType, fcDrawable, fcTexture, 2)
+            end
+        end
+    end
+
+    -- Forced components do not pick proper torso for 'None' variant, need manual correction
+    if GetEntityModel(playerPed) == GetHashKey('mp_f_freemode_01') then
+        if (GetPedDrawableVariation(playerPed, 11) == 15) and (GetPedTextureVariation(playerPed, 11) == 16) then
+            currentChar['arms'] = 15
+            currentChar['arms_2'] = 0
+            SetPedComponentVariation(playerPed, 3, 15, 0, 2);
+        end
+    elseif GetEntityModel(playerPed) == GetHashKey('mp_m_freemode_01') then
+        if (GetPedDrawableVariation(playerPed, 11) == 15) and (GetPedTextureVariation(playerPed, 11) == 0) then
+            currentChar['arms'] = 15
+            currentChar['arms_2'] = 0
+            SetPedComponentVariation(playerPed, 3, 15, 0, 2);
+        end
+    end
+end)
+
+RegisterNUICallback('updateApparelProp', function(data, cb)
+    local drawableKey = data['drwkey']
+    local textureKey = data['texkey']
+    local prop = tonumber(data['propid'])
+    currentChar[drawableKey] = tonumber(data['drwval'])
+    currentChar[textureKey] = tonumber(data['texval'])
+
+    local playerPed = PlayerPedId()
+
+    if currentChar[drawableKey] == -1 then
+        ClearPedProp(playerPed, prop)
+    else
+        SetPedPropIndex(playerPed, prop, currentChar[drawableKey], currentChar[textureKey], false)
+    end
+end)
