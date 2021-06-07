@@ -981,13 +981,15 @@ function LoadCharacter(data, playIdleWhenLoaded, callback)
     end
 end
 
--- Map Locations
+-- Function For Displaying Help Text 
 
 function DisplayTooltip(suffix)
     SetTextComponentFormat('STRING')
     AddTextComponentString('Press ~INPUT_PICKUP~ To ' .. suffix)
-    DisplayHelpTextFromStringLabel(0, 0, 1, -1)
+    EndTextCommandDisplayHelp(0, 0, 1, -1)
 end
+
+-- Map Locations
 
 CreateThread(function()
     while true do
@@ -997,36 +999,51 @@ CreateThread(function()
 
         for i=1, #Config.ClothingShops do
             local loc = Config.ClothingShops[i]
+            local amount = Config.ClothingShopCost
             local distance = #(playerCoords - vector3(loc[1], loc[2], loc[3]))
             if distance < 2.5 then
                 sleep = false
-                DisplayTooltip('Browse Clothing')
+                DisplayTooltip('Browse Clothing For ~g~$~w~' ..amount)
                 if IsControlJustPressed(1, 38) then
-                    TriggerEvent('cui_character:open', { 'apparel' })
+                    QBCore.Functions.TriggerCallback('cui_character:checkMoney', function(cb)
+                        if cb then
+                            TriggerEvent('cui_character:open', { 'apparel' })
+                        end
+                    end, amount)
                 end
             end
         end
 
         for i=1, #Config.BarberShops do
             local loc = Config.BarberShops[i]
+            local amount = Config.BarberShopCost
             local distance = #(playerCoords - vector3(loc[1], loc[2], loc[3]))
             if distance < 2.5 then
                 sleep = false
-                DisplayTooltip('Browse Hair Styles')
+                DisplayTooltip('Browse Hair Styles For ~g~$~w~' ..amount)
                 if IsControlJustPressed(1, 38) then
-                    TriggerEvent('cui_character:open', { 'style' })
+                    QBCore.Functions.TriggerCallback('cui_character:checkMoney', function(cb)
+                        if cb then
+                            TriggerEvent('cui_character:open', { 'style' })
+                        end
+                    end, amount)
                 end
             end
         end
 
         for i=1, #Config.PlasticSurgeryUnits do
             local loc = Config.PlasticSurgeryUnits[i]
+            local amount = Config.PlasticSurgeryCost
             local distance = #(playerCoords - vector3(loc[1], loc[2], loc[3]))
             if distance < 2.5 then
                 sleep = false
-                DisplayTooltip('Get Plastic Surgery')
+                DisplayTooltip('Get Plastic Surgery For ~g~$~w~' ..amount)
                 if IsControlJustPressed(1, 38) then
-                    TriggerEvent('cui_character:open', { 'features' })
+                    QBCore.Functions.TriggerCallback('cui_character:checkMoney', function(cb)
+                        if cb then
+                            TriggerEvent('cui_character:open', { 'features' })
+                        end
+                    end, amount)
                 end
             end
         end

@@ -1,6 +1,25 @@
 QBCore = nil
 TriggerEvent('QBCore:GetObject', function(obj) QBCore = obj end)
 
+-- Money Stuff
+
+QBCore.Functions.CreateCallback('cui_character:checkMoney', function(source, cb, amount)
+    local _source = source
+    local Player = QBCore.Functions.GetPlayer(_source)
+    local cashamount = Player.Functions.GetMoney('cash')
+
+    if cashamount >= amount then
+        cb(true)
+        Player.Functions.RemoveMoney('cash', amount)
+        TriggerClientEvent('QBCore:Notify', _source, 'Paid $' ..amount, 'success')
+    else
+        cb(false)
+        TriggerClientEvent('QBCore:Notify', _source, 'Not Enough Money', 'error')
+    end
+end)
+
+-- Save Skin
+
 RegisterServerEvent('cui_character:save')
 AddEventHandler('cui_character:save', function(model, data)
     local _source = source
@@ -21,6 +40,8 @@ AddEventHandler('cui_character:save', function(model, data)
         end)
     end
 end)
+
+-- Get Skin
 
 RegisterServerEvent('cui_character:requestPlayerData')
 AddEventHandler('cui_character:requestPlayerData', function()
