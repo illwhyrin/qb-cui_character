@@ -28,13 +28,14 @@ AddEventHandler('cui_character:save', function(model, data)
 
     if citizenid then
         exports.ghmattimysql:execute('SELECT `skin` FROM `playerskins` WHERE `citizenid` = "'..citizenid..'"', function(result)
-            if result then
+            if result[1] then
                 exports.ghmattimysql:execute('UPDATE `playerskins` SET `skin` = @skin WHERE `citizenid` = "'..citizenid..'"', {['@skin'] = json.encode(data)})
             else
-                exports.ghmattimysql:execute('INSERT INTO `playerskins` (`citizenid`, `skin`, `model`) VALUES (@citizenid, @skin, @model) ON DUPLICATE KEY UPDATE `skin` = @skin', {
-                    ['@skin'] = json.encode(data),
+                exports.ghmattimysql:execute('INSERT INTO `playerskins` (`citizenid`, `skin`, `model`, `active`) VALUES (@citizenid, @skin, @model, @active)', {
                     ['@citizenid'] = citizenid,
-                    ['@model'] = model
+                    ['@skin'] = json.encode(data),
+                    ['@model'] = model,
+                    ['@active'] = 1
                 })
             end
         end)
