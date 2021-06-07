@@ -1,5 +1,9 @@
 Config = {}
 
+Config.ClothingShopCost = 25
+Config.BarberShopCost = 25
+Config.PlasticSurgeryCost = 500
+
 -- Setting these to false will enable all colors available in the game.
 Config.UseNaturalHairColors = false
 Config.UseNaturalEyeColors = false
